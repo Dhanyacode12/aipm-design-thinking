@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Job check (prototype)</title>
+<!--
+Learning question: When a student sees a job ad, does a short set of questions
+with a Quick apply / Worth tailoring / Ask first result help them decide what
+to do, and do they treat the result as a final verdict?
+
+Low-fidelity on purpose. The question-to-result rules are the AI's guesses, not
+evidence. See discovery.md and decision-log.md.
+-->
+<style>
+  body { font-family: Arial, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; color: #000; background: #fff; }
+  fieldset { border: 1px solid #000; margin: 0 0 1.25rem; padding: 0.75rem 1rem; }
+  legend { font-weight: bold; padding: 0 0.25rem; }
+  label { display: block; margin: 0.35rem 0; cursor: pointer; }
+  button { font: inherit; padding: 0.5rem 1rem; border: 2px solid #000; background: #fff; cursor: pointer; }
+  button:focus, input:focus { outline: 3px solid #000; outline-offset: 2px; }
+  #result { border: 2px solid #000; padding: 1rem; margin-top: 1.5rem; }
+  #result h2 { margin-top: 0; }
+  .note { font-style: italic; }
+  .error { font-weight: bold; }
+</style>
+</head>
+<body>
+<h1>Job check</h1>
+<p>Think of one job ad you are considering. Answer five questions about it.</p>
+
+<form id="form" novalidate autocomplete="off">
+  <fieldset>
+    <legend>1. How much would you need to change your CV for this job?</legend>
+    <label><input type="radio" name="q1" value="nothing"> Nothing (it is already adjusted)</label>
+    <label><input type="radio" name="q1" value="little"> A little</label>
+    <label><input type="radio" name="q1" value="lot"> A lot</label>
+  </fieldset>
+
+  <fieldset>
+    <legend>2. Does the level label (junior, mid, senior) match the experience the ad asks for?</legend>
+    <label><input type="radio" name="q2" value="yes"> Yes</label>
+    <label><input type="radio" name="q2" value="no"> No</label>
+  </fieldset>
+
+  <fieldset>
+    <legend>3. Do you meet the main requirements, including language?</legend>
+    <label><input type="radio" name="q3" value="mostly"> Yes, mostly</label>
+    <label><input type="radio" name="q3" value="gaps"> Some gaps</label>
+    <label><input type="radio" name="q3" value="missing"> No, I am missing a key one</label>
+  </fieldset>
+
+  <fieldset>
+    <legend>4. Do you know anyone connected to this company?</legend>
+    <label><input type="radio" name="q4" value="yes"> Yes</label>
+    <label><input type="radio" name="q4" value="no"> No</label>
+  </fieldset>
+
+  <fieldset>
+    <legend>5. Is there a requirement in the ad that you are unsure whether you meet?</legend>
+    <label><input type="radio" name="q5" value="yes"> Yes</label>
+    <label><input type="radio" name="q5" value="no"> No</label>
+  </fieldset>
+
+  <button type="submit">Show result</button>
+  <button type="button" id="start-over">Start over</button>
+  <p id="error" class="error" role="alert" hidden>Please answer all five questions.</p>
+</form>
+
+<div id="result" aria-live="polite" hidden></div>
+
+<details id="log-box">
+  <summary>Facilitator log (results shown in this browser tab)</summary>
+  <ol id="log"></ol>
+</details>
+
+<script>
+  // Rules are guesses for testing the experience. There is deliberately no "skip" result.
+  function getResult(a) {
+    var askFirst = a.q3 === 'missing' || a.q2 === 'no' || a.q5 === 'yes';
+    var result;
+    if (askFirst) {
+      result = {
+        title: 'Ask first',
+        text: 'Something about this job is unclear or does not line up. Check before you spend time on a CV.'
+      };
+    } else if (a.q1 === 'nothing' && a.q3 === 'mostly') {
+      result = {
+        title: 'Quick apply',
+        text: 'Your answers suggest your CV already fits and you meet the main requirements.'
+      };
+    } else {
+      result = {
+        title: 'Worth tailoring',
+        text: 'You are a reasonable match, and some adjustment of your CV could help.'
+      };
+    }
+    if (a.q4 === 'yes') {
+      result.text += ' You know someone connected to this company. You could ask them.';
+    }
+    return result;
+  }
+
+  function resetForm() {
+    document.getElementById('form').reset();
+    document.getElementById('result').hidden = true;
+    document.getElementById('error').hidden = true;
+  }
+
+  // Each shown result is saved for the facilitator. Start over and refresh clear the answers, not this log.
+  var LOG_KEY = 'jobcheck-log';
+  function loadLog() {
+    try { return JSON.parse(sessionStorage.getItem(LOG_KEY)) || []; } catch (err) { return []; }
+  }
+  var log = loadLog();
+  function saveLog() {
+    try { sessionStorage.setItem(LOG_KEY, JSON.stringify(log)); } catch (err) { /* storage unavailable: log lasts until reload */ }
+  }
+  function renderLog() {
+    var list = document.getElementById('log');
+    list.innerHTML = '';
+    log.forEach(function (entry) {
+      var li = document.createElement('li');
+      li.textContent = entry.time + ' | CV change: ' + entry.answers.q1 + ', level match: ' + entry.answers.q2 +
+        ', requirements: ' + entry.answers.q3 + ', contact: ' + entry.answers.q4 +
+        ', unsure requirement: ' + entry.answers.q5 + ' => ' + entry.result;
+      list.appendChild(li);
+    });
+  }
+  renderLog();
+  document.getElementById('start-over').addEventListener('click', resetForm);
+  // Browsers can restore form state when a page is reloaded or reached via back/forward
+  window.addEventListener('pageshow', resetForm);
+
+  document.getElementById('form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var answers = {};
+    var missing = [];
+    ['q1', 'q2', 'q3', 'q4', 'q5'].forEach(function (name, i) {
+      var checked = document.querySelector('input[name="' + name + '"]:checked');
+      if (checked) { answers[name] = checked.value; } else { missing.push(i + 1); }
+    });
+    var error = document.getElementById('error');
+    var box = document.getElementById('result');
+    if (missing.length) {
+      error.textContent = 'Please answer question ' + missing.join(', ') + '.';
+      error.hidden = false;
+      box.hidden = true;
+      document.querySelector('input[name="q' + missing[0] + '"]').focus();
+      return;
+    }
+    error.hidden = true;
+    var r = getResult(answers);
+    log.push({ time: new Date().toLocaleTimeString(), answers: answers, result: r.title });
+    saveLog();
+    renderLog();
+    box.innerHTML = '';
+    var h = document.createElement('h2');
+    h.textContent = r.title;
+    var p = document.createElement('p');
+    p.textContent = r.text;
+    // The "prompt for your own judgement" note is removed for the first test so it does not hint at the answer
+    // to the learning question (prototype-reviewer finding 1). Record this version in test-notes.md.
+    box.appendChild(h);
+    box.appendChild(p);
+    box.hidden = false;
+  });
+</script>
+</body>
+</html>
